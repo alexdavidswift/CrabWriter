@@ -35,6 +35,17 @@ const int kJumpSamples = 2;           // consecutive samples needed to believe i
 const uint32_t kSettleMs = 60000;     // free movement after boot / unplug
 const int kSmoothing = 8;             // moving-average weight (~16 s at 2 s/sample)
 
+// With the power switch off, the battery is disconnected from everything
+// (including the charger), but USB still runs the device through a diode. The
+// ADC then reads the charger's own output sitting at its ~4.2 V target with no
+// battery on it, which used to show as a confident "100%". Treat a reading
+// pegged up there as "no useful battery reading" and show nothing. A full
+// battery on charge sits close to the same voltage and may also read as
+// unknown, which is better than inventing a number.
+const int kPeggedMv = 4190;
+const int kPeggedClearMv = 4165;      // hysteresis
+const uint32_t kPeggedMs = 20000;
+
 bool s_have = false;
 int s_avg = 0;            // smoothed voltage, mV
 int s_display = -1;       // percent shown to the user
@@ -42,6 +53,8 @@ bool s_usb = false;
 int s_usbOffset = 0;      // size of the plug-in jump, mV
 int s_usbStartMv = 0;     // voltage when plug-in was detected
 int s_stepDir = 0, s_stepCount = 0, s_stepSum = 0;  // pending out-of-range readings
+uint32_t s_peggedSince = 0;
+bool s_unknown = false;
 uint32_t s_settleUntil = 0;
 
 void reseed(uint32_t now, int mv) {
@@ -49,6 +62,8 @@ void reseed(uint32_t now, int mv) {
   s_display = batteryPercentForVoltage(mv);
   s_settleUntil = now + kSettleMs;
   s_stepDir = s_stepCount = 0;
+  s_peggedSince = 0;
+  s_unknown = false;
 }
 
 }  // namespace
@@ -72,6 +87,8 @@ void batteryReset() {
   s_usb = false;
   s_usbOffset = 0;
   s_stepDir = s_stepCount = 0;
+  s_peggedSince = 0;
+  s_unknown = false;
 }
 
 void batteryFeed(uint32_t now, int mv) {
@@ -116,6 +133,22 @@ void batteryFeed(uint32_t now, int mv) {
     s_stepDir = s_stepCount = 0;
     s_avg += (mv - s_avg) / kSmoothing;
   }
+
+  // No battery on the reading (power switch off while plugged in)?
+  if (s_avg >= kPeggedMv) {
+    if (!s_peggedSince) s_peggedSince = now;
+    if (!s_unknown && now - s_peggedSince >= kPeggedMs) {
+      s_unknown = true;
+      s_display = -1;
+    }
+  } else if (s_avg < kPeggedClearMv) {
+    s_peggedSince = 0;
+    if (s_unknown) {  // a battery is back on the reading
+      s_unknown = false;
+      reseed(now, s_avg);
+    }
+  }
+  if (s_unknown) return;
 
   if (s_usb && s_avg < s_usbStartMv - 25) {
     // A charging battery never falls below its plug-in voltage: that "jump"
