@@ -149,6 +149,10 @@ timestamps (UTC; the Cardputer has no battery-backed clock). Syncing is next.
 - The whole document is held in RAM (no PSRAM on the Cardputer). Measured on a Cardputer ADV:
   about 140 KB of text per file (~22k words) with Wi-Fi off, about 95 KB (~15k words) while
   Wi-Fi is connected. **Esc → Help & info** shows free RAM. For a novel, use one file per chapter.
+- The battery percentage is an estimate from the battery's voltage: the Cardputer ADV has no
+  fuel-gauge chip, and its charger's status pins aren't wired to the ESP32. It uses a Li-ion
+  discharge curve and smoothing, holds steady instead of jumping when you plug in, and
+  corrects itself when you unplug. Expect roughly ±10%.
 - No undo, selection or copy/paste yet.
 - Built-in fonts are ASCII-only. Use converted fonts for accented characters.
 
@@ -195,6 +199,7 @@ stand-ins on the PC, so those still need testing on a real device.
 | `src/usb_drive.*` | SD card as a USB mass-storage drive (TinyUSB) |
 | `src/wifi_mgr.*` | Wi-Fi scan / connect / status, clock from NTP |
 | `src/settings.*` | Settings file and themes |
+| `src/battery.*` | Battery percentage from voltage: curve, smoothing, plug/unplug handling |
 | `tools/fontconv.py` | TTF/OTF/BDF → `.cpf` converter (format documented in the file) |
 
 ## Licence

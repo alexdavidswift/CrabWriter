@@ -37,7 +37,7 @@ printf 'theme=Night\nfont=%s\nlast_file=chapter-01.txt\n' "$FONT" > "$SDROOT/wri
 
 g++ -std=c++17 -O1 -Wall -static -I test/host/stubs -I src \
   test/host/uishots.cpp test/host/stubs/stubs.cpp test/host/stubs/app_stubs.cpp \
-  src/main.cpp src/gapbuffer.cpp src/editor.cpp src/font.cpp src/settings.cpp \
+  src/main.cpp src/gapbuffer.cpp src/editor.cpp src/font.cpp src/settings.cpp src/battery.cpp \
   -o "$OUT/uishots.exe"
 "$OUT/uishots.exe" "$SDROOT" "$OUT" >/dev/null
 

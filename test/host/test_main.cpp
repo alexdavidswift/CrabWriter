@@ -431,6 +431,8 @@ static void testWordCount(Font* font) {
   CHECK(ed.wordCount() == 5);
 }
 
+#include "test_battery.cpp"
+
 // ----------------------------------------------------------------- fonts --
 
 static void testFonts() {
@@ -566,6 +568,7 @@ int main(int argc, char** argv) {
   testMemoryFull();
   testSettings();
   testFonts();
+  testBattery();
 
   Font* mono = fontOpen("consola-12.cpf");
   Font* prop = fontOpen("arial-11.cpf");
