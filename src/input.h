@@ -39,3 +39,7 @@ void inputPoll();                 // call every loop
 bool inputNext(KeyEvent& ev);     // pop one queued event
 void inputPush(const KeyEvent& ev);
 uint32_t inputLastActivity();     // millis() of the last key event
+
+// Menu screens: the Cardputer's ; . , / keys act as arrows and ` as Esc
+// without holding Fn (their printed characters are useless in a menu).
+void inputSetNavKeys(bool on);

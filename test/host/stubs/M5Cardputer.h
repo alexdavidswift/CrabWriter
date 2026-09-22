@@ -40,6 +40,8 @@ class M5Canvas : public LGFX_Sprite {
 
 struct EspClass {
   uint32_t getFreeHeap() { return 182 * 1024; }
+  void restart() { hostRestarted = true; }
+  bool hostRestarted = false;
 };
 extern EspClass ESP;
 

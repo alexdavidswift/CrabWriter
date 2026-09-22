@@ -9,6 +9,8 @@ A distraction-free writing firmware for the **M5Stack Cardputer** and **Cardpute
   spacing, margins, 8 colour themes + a custom one, cursor style, typewriter scrolling,
   status bar, brightness. Font and style menus preview live on your actual document.
 - **USB keyboard.** Plug a USB keyboard into the Cardputer's USB-C port (USB host mode).
+- **USB drive.** Open the SD card on a computer over the same USB-C cable.
+- **Wi-Fi.** Scan, connect and remember a network (groundwork for syncing).
 - **Files.** Esc opens a menu to create, open, rename and delete documents. Plain `.txt`
   / `.md` files on the SD card, autosaved, with a `.bak` of the previous save.
 
@@ -95,28 +97,58 @@ Please respect each font's licence. Most itch.io fonts allow personal use.
 | Toggle status bar | Ctrl+B | Ctrl+B |
 | Document start / end | Ctrl+Home / Ctrl+End | Ctrl + Fn + Opt + `,` / `/` |
 
-In the file list: **Enter** open, **N** new, **R** rename, **D** delete.
+In menus on the Cardputer keyboard you don't need Fn: `;` `.` `,` `/` are the arrows and
+`` ` `` is Esc. In the file list: **Enter** open, **N** new, **R** rename, **D** delete.
 
-## USB keyboard
+## USB mode
 
-Enable it in **Esc → USB keyboard** (the setting is remembered, so the host starts at every
-boot after that). Then connect the keyboard with a USB-C OTG adapter or a USB-C keyboard
+The ESP32-S3 has a single USB port, so it does one job at a time. Pick it in
+**Esc → USB mode**:
+
+| Mode | What it does |
+|---|---|
+| Keyboard | USB keyboard support. Remembered; starts at every boot. |
+| Computer: SD card drive | The SD card shows up as a drive on your computer. |
+| Off | The port only charges (and can be flashed). |
+
+### SD card drive
+
+Plug the Cardputer into a computer and choose **Computer: SD card drive**. Your document is
+saved first, and writing pauses while the computer has the card (both editing the same card
+at once would corrupt it). When you're done, eject the drive on the computer, then press
+**Esc**: CrabWriter restarts and picks up whatever you changed. If the keyboard mode was
+running it restarts straight into drive mode first.
+
+On the Cardputer ADV, move the side switch off **5VOUT** before connecting to a computer.
+
+### USB keyboard
+
+Choose **Keyboard**, then connect the keyboard with a USB-C OTG adapter or a USB-C keyboard
 cable.
 
 - **Power:** on the Cardputer ADV, set the switch on the side to **5VOUT** so the port powers
   the keyboard. If a keyboard doesn't light up or isn't detected, power is the first thing
   to check. A powered hub/adapter also works.
-- **The ESP32-S3 has one USB port.** While the keyboard host is running, the USB serial port
-  is unavailable, so flashing needs download mode (hold G0 at power-on). Turning the option
-  off takes effect after a restart.
+- While the keyboard host is running, the USB serial port is unavailable, so flashing needs
+  download mode (hold G0 at power-on). Switching away from Keyboard takes effect after a
+  restart.
 - Supports standard HID keyboards (boot protocol), which is nearly all of them. Keyboards
   behind a USB hub, and hubs built into keyboards, are not supported by the ESP-IDF version
   used. US layout only for now. Caps Lock works, including the LED.
 
+## Wi-Fi
+
+**Esc → Wi-Fi → Network** scans for networks; pick one and type its password. The network is
+remembered in `settings.txt` (the password is stored in plain text on the card). Wi-Fi stays
+off until you connect, since it costs battery and about 52 KB of RAM while connected (less
+room for the document). While connected the clock is set from the internet, so saved files get real
+timestamps (UTC; the Cardputer has no battery-backed clock). Syncing is next.
+
 ## Limits / known gaps
 
-- The whole document is held in RAM (no PSRAM on the Cardputer). Expect roughly 100–150 KB of
-  text per file (about 15–25k words). **Esc → Help & info** shows free RAM. For a novel, use one file per chapter.
+- The whole document is held in RAM (no PSRAM on the Cardputer). Measured on a Cardputer ADV:
+  about 140 KB of text per file (~22k words) with Wi-Fi off, about 95 KB (~15k words) while
+  Wi-Fi is connected. **Esc → Help & info** shows free RAM. For a novel, use one file per chapter.
 - No undo, selection or copy/paste yet.
 - Built-in fonts are ASCII-only. Use converted fonts for accented characters.
 
@@ -145,8 +177,10 @@ To preview a folder of converted fonts as contact sheets (`test/host/out/fontsho
 
 ```bash
 bash test/host/fontshots.sh sd/writer/fonts
-``` The USB and Cardputer keyboard drivers and
-the menus in `main.cpp` still need real hardware.
+```
+
+Hardware drivers (USB keyboard, USB drive, Wi-Fi, the Cardputer keyboard) are replaced by
+stand-ins on the PC, so those still need testing on a real device.
 
 ## Code map
 
@@ -158,6 +192,8 @@ the menus in `main.cpp` still need real hardware.
 | `src/font.*` | Font interface, built-in fonts, `.cpf` loader & renderer |
 | `src/input.*` | Unified key events + Cardputer keyboard with key repeat |
 | `src/usb_kbd.*` | USB host HID keyboard driver (own FreeRTOS task) |
+| `src/usb_drive.*` | SD card as a USB mass-storage drive (TinyUSB) |
+| `src/wifi_mgr.*` | Wi-Fi scan / connect / status, clock from NTP |
 | `src/settings.*` | Settings file and themes |
 | `tools/fontconv.py` | TTF/OTF/BDF → `.cpf` converter (format documented in the file) |
 

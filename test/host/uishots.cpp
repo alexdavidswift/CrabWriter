@@ -77,13 +77,32 @@ int main(int argc, char** argv) {
   press(K_LEFT);
   press(K_ESC);
 
-  press(K_DOWN);  // USB keyboard
+  press(K_DOWN);  // Wi-Fi
   press(K_ENTER);
-  shot("10_usb_confirm");
+  shot("10_wifi");
+  press(K_ENTER);  // Network -> scan
+  loop();          // the scan runs after "Scanning..." is drawn
+  loop();
+  shot("11_wifi_scan");
+  press(K_ENTER);  // first network is secured -> password prompt
+  typeText("lighthouse42");
+  shot("12_wifi_password");
+  press(K_ENTER);
+  loop();
+  shot("13_wifi_connected");
   press(K_ESC);
 
-  press(K_DOWN);  // Help
+  press(K_DOWN);  // USB mode
   press(K_ENTER);
-  shot("11_help");
+  shot("14_usb_mode");
+  press(K_UP);  // opens on the active mode (Off); one up is "Computer: SD card drive"
+  press(K_ENTER);
+  shot("15_usb_drive_confirm");
+  press(K_CHAR, 'y');
+  shot("16_usb_drive");
+  press(K_ESC);  // not ejected yet: first Esc only warns
+  shot("17_usb_drive_not_ejected");
+  press(K_ESC);
+  if (!ESP.hostRestarted) printf("ERROR: drive mode did not restart\n");
   return 0;
 }

@@ -8,6 +8,8 @@
 #include <cstring>
 #include <string>
 
+#define RTC_NOINIT_ATTR
+
 uint32_t millis();
 void hostAdvanceMillis(uint32_t ms);  // tests control the clock
 
