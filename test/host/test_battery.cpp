@@ -137,6 +137,20 @@ static void testBattery() {
     CHECK(std::abs(batteryPercent() - batteryPercentForVoltage(3930)) <= 3);
   }
 
+  // --- power switch off while plugged in: charger output, no battery attached
+  {
+    batteryReset();
+    Sim sim;
+    sim.noise = 4;
+    sim.run(10, [](uint32_t) { return 4200; });
+    CHECK(batteryPercent() >= 0);  // not judged yet
+    sim.run(120, [](uint32_t) { return 4200; });
+    CHECK(batteryPercent() == -1);  // shows nothing rather than a fake 100%
+    // Switch turned on: a real (half full) battery appears on the reading.
+    sim.run(180, [](uint32_t) { return 3850; });
+    CHECK(std::abs(batteryPercent() - 60) <= 3);
+  }
+
   // --- garbage readings are ignored
   {
     batteryReset();
