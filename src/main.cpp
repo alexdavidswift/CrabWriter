@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "battery.h"
 #include "config.h"
 #include "editor.h"
 #include "font.h"
@@ -28,9 +29,11 @@ static bool needRedraw = true;
 
 // ------------------------------------------------------------------ misc --
 
-static int s_battery = -1;
+// Battery: sampled every 2 s and steadied by battery.cpp (voltage-only gauge).
+static int s_battery = -1;  // last value drawn
 static uint32_t s_batteryAt = 0;
-int batteryLevel() { return s_battery; }
+static const uint32_t BATTERY_SAMPLE_MS = 2000;
+int batteryLevel() { return batteryPercent(); }
 
 static void applyBrightness() { M5Cardputer.Display.setBrightness(settings.brightness * 255 / 100); }
 
@@ -979,7 +982,8 @@ void setup() {
 
   if (mountSD()) startApp();
   else screen = SCR_NOSD;
-  s_battery = M5Cardputer.Power.getBatteryLevel();
+  batteryFeed(millis(), M5Cardputer.Power.getBatteryVoltage());
+  s_battery = batteryPercent();
   s_batteryAt = millis();
   needRedraw = true;
 }
@@ -1032,10 +1036,13 @@ void loop() {
     }
   }
 
-  if (now - s_batteryAt > 15000) {
+  if (now - s_batteryAt >= BATTERY_SAMPLE_MS) {
     s_batteryAt = now;
-    int b = M5Cardputer.Power.getBatteryLevel();
-    if (b != s_battery) { s_battery = b; needRedraw = true; }
+    batteryFeed(now, M5Cardputer.Power.getBatteryVoltage());
+    if (batteryPercent() != s_battery) {
+      s_battery = batteryPercent();
+      needRedraw = true;
+    }
   }
 
   // Cursor blink, transient messages, and USB status changes.

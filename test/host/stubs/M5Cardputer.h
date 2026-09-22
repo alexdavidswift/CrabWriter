@@ -20,6 +20,7 @@ struct HostSpeaker {
 };
 struct HostPower {
   int getBatteryLevel() { return 87; }
+  int getBatteryVoltage() { return 4020; }
 };
 struct HostCardputer {
   HostDisplay Display;

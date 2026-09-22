@@ -18,7 +18,7 @@ g++ -std=c++17 -O1 -g -Wall -Wno-unused-function -static \
   -D_GLIBCXX_ASSERTIONS \
   -I test/host/stubs -I src \
   test/host/test_main.cpp test/host/stubs/stubs.cpp test/host/stubs/battery_stub.cpp \
-  src/gapbuffer.cpp src/editor.cpp src/font.cpp src/settings.cpp \
+  src/gapbuffer.cpp src/editor.cpp src/font.cpp src/settings.cpp src/battery.cpp \
   -o "$OUT/tests.exe" 2>&1 | grep -v "^$" || true
 [ -f "$OUT/tests.exe" ] || { echo "build failed"; exit 1; }
 
