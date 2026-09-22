@@ -1,0 +1,2 @@
+Put converted .cpf fonts in this folder.
+Convert with:  python tools/fontconv.py MyFont.ttf -o sd/writer/fonts

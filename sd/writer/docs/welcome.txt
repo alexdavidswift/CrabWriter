@@ -1,0 +1,5 @@
+Welcome to CrabWriter.
+
+Press Esc (Fn + ` on the Cardputer keyboard) to open the menu: new documents, open files, fonts, style and themes.
+
+Try Ctrl+] to flip through fonts and Ctrl+T to cycle themes while you write. Everything saves automatically.

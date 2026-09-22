@@ -1,0 +1,12 @@
+# Build output
+.pio/
+.vscode/
+dist/
+test/host/out/
+__pycache__/
+
+# Fonts are their designers' work under their own licences - don't publish them.
+# Put source fonts in fonts/ and converted ones in sd/writer/fonts/ locally.
+/fonts/
+sd/writer/fonts/*
+!sd/writer/fonts/PUT_FONTS_HERE.txt
