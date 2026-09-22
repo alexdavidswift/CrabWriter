@@ -12,14 +12,17 @@
 #include "font.h"
 #include "input.h"
 #include "settings.h"
+#include "usb_drive.h"
 #include "usb_kbd.h"
+#include "wifi_mgr.h"
 
 static M5Canvas canvas(&M5Cardputer.Display);
 static Editor editor;
 static Font* curFont = nullptr;
 static std::vector<FontEntry> fontList;
 
-enum Screen { SCR_EDITOR, SCR_MENU, SCR_FILES, SCR_FONTS, SCR_STYLE, SCR_PROMPT, SCR_CONFIRM, SCR_HELP, SCR_NOSD };
+enum Screen { SCR_EDITOR, SCR_MENU, SCR_FILES, SCR_FONTS, SCR_STYLE, SCR_PROMPT, SCR_CONFIRM, SCR_HELP, SCR_NOSD,
+              SCR_WIFI, SCR_WIFI_SCAN, SCR_USB, SCR_DRIVE };
 static Screen screen = SCR_EDITOR;
 static bool needRedraw = true;
 
@@ -229,22 +232,46 @@ static void uiOverlay(const String& line1, const String& line2) {
 
 // ------------------------------------------------------------ main menu --
 
-enum MenuItem { MI_RESUME, MI_NEW, MI_OPEN, MI_FONTS, MI_STYLE, MI_USB, MI_HELP };
-static const MenuItem kMenu[] = {MI_RESUME, MI_NEW, MI_OPEN, MI_FONTS, MI_STYLE, MI_USB, MI_HELP};
+enum MenuItem { MI_RESUME, MI_NEW, MI_OPEN, MI_FONTS, MI_STYLE, MI_WIFI, MI_USB, MI_HELP };
+static const MenuItem kMenu[] = {MI_RESUME, MI_NEW, MI_OPEN, MI_FONTS, MI_STYLE, MI_WIFI, MI_USB, MI_HELP};
 static const int kMenuCount = sizeof(kMenu) / sizeof(kMenu[0]);
 static int menuSel = 0, menuTop = 0;
 
 // prompt / confirm state
-enum PromptMode { PR_NEW, PR_RENAME };
+enum PromptMode { PR_NEW, PR_RENAME, PR_WIFI_PASS };
 static PromptMode promptMode;
 static String promptTitle, promptText, promptError;
-enum ConfirmMode { CF_DELETE, CF_USB };
+enum ConfirmMode { CF_DELETE, CF_USB, CF_DRIVE };
 static ConfirmMode confirmMode;
 static String confirmText;
 static Screen confirmReturn;
 
 static int filesSel = 0, filesTop = 0;
 static int helpTop = 0;
+static int usbSel = 0, usbTop = 0;
+
+// Wi-Fi screens
+static int wifiSel = 0, wifiTop = 0;
+static std::vector<WifiNet> wifiNets;
+static int wifiScanSel = 0, wifiScanTop = 0;
+static int wifiScanResult = 0;
+static bool wifiScanPending = false;
+static String wifiPendingSsid;
+
+static String netStateText() {
+  switch (wifiState()) {
+    case NET_CONNECTED: return "connected";
+    case NET_CONNECTING: return "connecting...";
+    case NET_FAILED: return "failed";
+    default: return "off";
+  }
+}
+
+static String usbModeText() {
+  if (!settings.usbKeyboard) return usbKbdStarted() ? "off (restart)" : "off";
+  if (!usbKbdStarted()) return "keyboard (restart)";
+  return usbKbdConnected() ? "keyboard: connected" : "keyboard";
+}
 
 static void startPrompt(PromptMode m, const String& title, const String& initial) {
   promptMode = m;
@@ -253,6 +280,8 @@ static void startPrompt(PromptMode m, const String& title, const String& initial
   promptError = "";
   screen = SCR_PROMPT;
 }
+
+static void enterDriveMode();
 
 static void startConfirm(ConfirmMode m, const String& text, Screen ret) {
   confirmMode = m;
@@ -271,10 +300,8 @@ static void drawMenu() {
       case MI_OPEN: items.push_back("Open document"); right.push_back(""); break;
       case MI_FONTS: items.push_back("Fonts"); right.push_back(curFont ? curFont->name() : ""); break;
       case MI_STYLE: items.push_back("Style & theme"); right.push_back(theme().name); break;
-      case MI_USB:
-        items.push_back("USB keyboard");
-        right.push_back(settings.usbKeyboard ? (usbKbdConnected() ? "connected" : "on") : "off");
-        break;
+      case MI_WIFI: items.push_back("Wi-Fi"); right.push_back(netStateText()); break;
+      case MI_USB: items.push_back("USB mode"); right.push_back(usbModeText()); break;
       case MI_HELP: items.push_back("Help & info"); right.push_back(""); break;
     }
   }
@@ -300,15 +327,8 @@ static void menuKey(const KeyEvent& ev) {
           break;
         case MI_FONTS: fontScan(fontList); screen = SCR_FONTS; break;
         case MI_STYLE: screen = SCR_STYLE; break;
-        case MI_USB:
-          if (!settings.usbKeyboard) {
-            startConfirm(CF_USB, "Enable USB keyboard? The USB serial port stops working until you power off.", SCR_MENU);
-          } else {
-            settings.usbKeyboard = false;
-            settingsSave();
-            editor.flash("USB host stays on until restart", 3000);
-          }
-          break;
+        case MI_WIFI: wifiSel = 0; screen = SCR_WIFI; break;
+        case MI_USB: usbSel = settings.usbKeyboard ? 0 : 2; screen = SCR_USB; break;
         case MI_HELP: helpTop = 0; screen = SCR_HELP; break;
       }
       break;
@@ -379,7 +399,7 @@ static void drawPrompt() {
   uiBegin(promptTitle.c_str());
   canvas.setFont(&fonts::Font2);
   canvas.setTextColor(rgb565(t.dim));
-  canvas.drawString("File name:", 6, 26);
+  canvas.drawString(promptMode == PR_WIFI_PASS ? "Password:" : "File name:", 6, 26);
   canvas.drawRect(4, 44, SCREEN_W - 8, 22, rgb565(t.fg));
   canvas.setTextColor(rgb565(t.fg));
   // Show the tail of long names.
@@ -397,14 +417,26 @@ static void drawPrompt() {
 
 static void promptKey(const KeyEvent& ev) {
   switch (ev.key) {
-    case K_ESC: screen = (promptMode == PR_RENAME) ? SCR_FILES : SCR_MENU; break;
+    case K_ESC:
+      screen = promptMode == PR_RENAME ? SCR_FILES : promptMode == PR_WIFI_PASS ? SCR_WIFI_SCAN : SCR_MENU;
+      break;
     case K_BACKSPACE:
       if (promptText.length()) promptText.remove(promptText.length() - 1);
       break;
     case K_CHAR:
-      if (!(ev.mods & MOD_CTRL) && promptText.length() < 48) promptText += (char)ev.ch;
+      if (!(ev.mods & MOD_CTRL) && promptText.length() < 63) promptText += (char)ev.ch;
       break;
     case K_ENTER: {
+      if (promptMode == PR_WIFI_PASS) {
+        if (promptText.length() < 8) { promptError = "Wi-Fi passwords are 8+ characters"; break; }
+        settings.wifiSsid = wifiPendingSsid;
+        settings.wifiPass = promptText;
+        settingsSave();
+        wifiConnect(settings.wifiSsid, settings.wifiPass);
+        wifiSel = 0;
+        screen = SCR_WIFI;
+        break;
+      }
       String name = cleanName(promptText);
       if (!name.length()) { promptError = "Please enter a name"; break; }
       if (!isDocName(name)) { promptError = "Use a .txt or .md name"; break; }
@@ -477,11 +509,203 @@ static void confirmKey(const KeyEvent& ev) {
       settings.lastFile = "";
       openSomething();
     }
+  } else if (confirmMode == CF_DRIVE) {
+    enterDriveMode();
   } else if (confirmMode == CF_USB) {
     settings.usbKeyboard = true;
     settingsSave();
     if (usbKbdStart()) editor.flash("USB host on - plug in a keyboard", 3000);
     else editor.flash(usbKbdStatus(), 3000);
+  }
+}
+
+// ------------------------------------------------------------ USB modes --
+
+// Survives ESP.restart() (not power-off): asks the next boot to go straight
+// into drive mode, before the USB keyboard host can claim the port.
+static RTC_NOINIT_ATTR uint32_t s_bootIntoDrive;
+static const uint32_t DRIVE_MAGIC = 0xC0FFEE42;
+static bool driveEscArmed = false;
+
+static void enterDriveMode() {
+  saveIfDirty();
+  settingsSave();
+  if (wifiState() != NET_OFF) wifiDisconnect();
+  if (usbKbdStarted()) {  // the port is taken until a restart
+    s_bootIntoDrive = DRIVE_MAGIC;
+    ESP.restart();
+    return;
+  }
+  driveEscArmed = false;
+  if (usbDriveStart()) screen = SCR_DRIVE;
+  else editor.flash("Could not start USB drive", 3000);
+}
+
+enum UsbRow { UR_KEYBOARD, UR_DRIVE, UR_OFF, UR_COUNT };
+
+static void drawUsb() {
+  uiBegin("USB mode");
+  std::vector<String> items = {"Keyboard", "Computer: SD card drive", "Off"};
+  std::vector<String> right = {settings.usbKeyboard ? "on" : "", "", settings.usbKeyboard ? "" : "on"};
+  uiList(items, right, usbSel, usbTop);
+  const char* hint = usbSel == UR_KEYBOARD ? "USB keyboard via OTG adapter"
+                   : usbSel == UR_DRIVE    ? "Edit your files on a computer"
+                                           : "USB-C only charges";
+  uiHint(hint);
+}
+
+static void usbKey(const KeyEvent& ev) {
+  switch (ev.key) {
+    case K_UP: usbSel = (usbSel + UR_COUNT - 1) % UR_COUNT; break;
+    case K_DOWN: usbSel = (usbSel + 1) % UR_COUNT; break;
+    case K_ESC: screen = SCR_MENU; break;
+    case K_ENTER:
+      if (usbSel == UR_KEYBOARD) {
+        if (!settings.usbKeyboard)
+          startConfirm(CF_USB, "Use a USB keyboard? The USB serial port stops working until you power off.", SCR_USB);
+      } else if (usbSel == UR_DRIVE) {
+        startConfirm(CF_DRIVE,
+                     "Open the SD card on a computer over USB? Writing pauses until you finish, "
+                     "then CrabWriter restarts. ADV: set the side switch off 5VOUT first.",
+                     SCR_USB);
+      } else if (settings.usbKeyboard) {
+        settings.usbKeyboard = false;
+        settingsSave();
+        if (usbKbdStarted()) editor.flash("Keyboard stays active until restart", 3000);
+      }
+      break;
+    default: break;
+  }
+}
+
+static void drawDrive() {
+  Theme t = theme();
+  uiBegin("USB drive");
+  canvas.setFont(&fonts::Font2);
+  canvas.setTextColor(rgb565(t.fg));
+  canvas.drawString("The SD card is now a drive", 6, 24);
+  canvas.drawString(String("on your computer (") + usbDriveSizeMB() + " MB).", 6, 41);
+  String status;
+  if (usbDriveEjected()) status = "Ejected - safe to unplug.";
+  else if (usbDriveBusy()) status = "Transferring...";
+  else status = "Eject it there before unplugging.";
+  canvas.setTextColor(rgb565(t.accent));
+  canvas.drawString(status, 6, 66);
+  if (driveEscArmed) {
+    canvas.setTextColor(rgb565(t.fg));
+    canvas.drawString("Not ejected! Esc again to restart", 6, 88);
+  }
+  uiHint("Esc  finish and restart");
+}
+
+static void driveKey(const KeyEvent& ev) {
+  if (ev.key != K_ESC) return;
+  // Restarting mid-write could corrupt the card; make that a deliberate choice.
+  if (!usbDriveEjected() && !driveEscArmed) {
+    driveEscArmed = true;
+    return;
+  }
+  ESP.restart();
+}
+
+enum WifiRow { WR_NETWORK, WR_CONNECT, WR_FORGET, WR_COUNT };
+
+static void drawWifi() {
+  String title = "Wi-Fi: " + netStateText();
+  uiBegin(title.c_str());
+  std::vector<String> items, right;
+  items.push_back("Network");
+  right.push_back(settings.wifiSsid.length() ? settings.wifiSsid : String("choose..."));
+  bool on = wifiState() == NET_CONNECTED || wifiState() == NET_CONNECTING;
+  items.push_back(on ? "Disconnect" : "Connect");
+  right.push_back("");
+  items.push_back("Forget network");
+  right.push_back("");
+  uiList(items, right, wifiSel, wifiTop);
+  String hint = "Enter select   Esc back";
+  if (wifiState() == NET_CONNECTED) hint = "IP " + wifiIp();
+  else if (wifiState() == NET_FAILED && wifiError()[0]) hint = wifiError();
+  uiHint(hint.c_str());
+}
+
+static void startWifiScan() {
+  wifiNets.clear();
+  wifiScanSel = wifiScanTop = 0;
+  wifiScanPending = true;  // drawn as "Scanning..." first, scanned after
+  screen = SCR_WIFI_SCAN;
+}
+
+static void wifiKey(const KeyEvent& ev) {
+  switch (ev.key) {
+    case K_UP: wifiSel = (wifiSel + WR_COUNT - 1) % WR_COUNT; break;
+    case K_DOWN: wifiSel = (wifiSel + 1) % WR_COUNT; break;
+    case K_ESC: screen = SCR_MENU; break;
+    case K_ENTER:
+      if (wifiSel == WR_NETWORK) {
+        startWifiScan();
+      } else if (wifiSel == WR_CONNECT) {
+        if (wifiState() == NET_CONNECTED || wifiState() == NET_CONNECTING) wifiDisconnect();
+        else if (!settings.wifiSsid.length()) startWifiScan();
+        else wifiConnect(settings.wifiSsid, settings.wifiPass);
+      } else if (wifiSel == WR_FORGET) {
+        wifiDisconnect();
+        settings.wifiSsid = "";
+        settings.wifiPass = "";
+        settingsSave();
+        editor.flash("Network forgotten");
+      }
+      break;
+    default: break;
+  }
+}
+
+static void drawWifiScan() {
+  Theme t = theme();
+  uiBegin("Choose network");
+  if (wifiScanPending || wifiScanResult <= 0) {
+    canvas.setFont(&fonts::Font2);
+    canvas.setTextColor(rgb565(t.fg));
+    const char* msg = wifiScanPending ? "Scanning..." : wifiScanResult < 0 ? wifiError() : "No networks found";
+    canvas.drawString(msg, 6, 26);
+    uiHint(wifiScanPending ? "" : "R rescan   Esc back");
+    return;
+  }
+  std::vector<String> items, right;
+  for (auto& n : wifiNets) {
+    items.push_back(n.ssid);
+    right.push_back(String(n.secure ? "" : "open  ") + wifiSignalPercent(n.rssi) + "%");
+  }
+  uiList(items, right, wifiScanSel, wifiScanTop);
+  uiHint("Enter connect   R rescan   Esc back");
+}
+
+static void wifiScanKey(const KeyEvent& ev) {
+  if (wifiScanPending) return;
+  int n = wifiNets.size();
+  switch (ev.key) {
+    case K_UP: if (n) wifiScanSel = (wifiScanSel + n - 1) % n; break;
+    case K_DOWN: if (n) wifiScanSel = (wifiScanSel + 1) % n; break;
+    case K_ESC: screen = SCR_WIFI; break;
+    case K_CHAR:
+      if (tolower(ev.ch) == 'r') startWifiScan();
+      break;
+    case K_ENTER: {
+      if (!n) break;
+      const WifiNet& net = wifiNets[wifiScanSel];
+      wifiPendingSsid = net.ssid;
+      if (!net.secure) {
+        settings.wifiSsid = net.ssid;
+        settings.wifiPass = "";
+        settingsSave();
+        wifiConnect(net.ssid, "");
+        wifiSel = 0;
+        screen = SCR_WIFI;
+      } else {
+        startPrompt(PR_WIFI_PASS, net.ssid, net.ssid == settings.wifiSsid ? settings.wifiPass : String(""));
+      }
+      break;
+    }
+    default: break;
   }
 }
 
@@ -601,6 +825,7 @@ static const char* kHelp[] = {
   " Ctrl+Home/End doc start / end",
   "CARDPUTER KEYS",
   " Fn + ; . , /  arrows",
+  "   (in menus no Fn needed, ` = Esc)",
   " Fn+Opt + ; .  page up / down",
   " Fn+Opt + , /  line start / end",
   " Fn + Bksp     delete forward",
@@ -622,6 +847,7 @@ static void drawHelp() {
   std::vector<String> info;
   info.push_back(String("Free RAM ") + (ESP.getFreeHeap() / 1024) + " KB   Doc " + humanSize(editor.length()));
   info.push_back(String("USB: ") + (usbKbdStarted() ? usbKbdStatus() : "off"));
+  info.push_back("Wi-Fi: " + netStateText() + (wifiState() == NET_CONNECTED ? "  " + wifiIp() : String("")));
   int rows = (SCREEN_H - UI_HEADER - 12) / lineH;
   int total = kHelpCount + (int)info.size() + 1;
   helpTop = constrain(helpTop, 0, std::max(0, total - rows));
@@ -718,6 +944,10 @@ static void draw() {
     case SCR_CONFIRM: drawConfirm(); break;
     case SCR_HELP: drawHelp(); break;
     case SCR_NOSD: drawNoSD(); break;
+    case SCR_WIFI: drawWifi(); break;
+    case SCR_WIFI_SCAN: drawWifiScan(); break;
+    case SCR_USB: drawUsb(); break;
+    case SCR_DRIVE: drawDrive(); break;
   }
   canvas.pushSprite(0, 0);
 }
@@ -728,8 +958,13 @@ static void startApp() {
   fontScan(fontList);
   if (!useFont(settings.font)) settingsSave();
   openSomething();
-  if (settings.usbKeyboard) usbKbdStart();
   screen = SCR_EDITOR;
+  if (s_bootIntoDrive == DRIVE_MAGIC) {  // restarted to free the USB port
+    s_bootIntoDrive = 0;
+    enterDriveMode();
+    return;
+  }
+  if (settings.usbKeyboard) usbKbdStart();
 }
 
 void setup() {
@@ -749,8 +984,14 @@ void setup() {
   needRedraw = true;
 }
 
+// Screens where ; . , / ` act as arrows/Esc on the Cardputer keyboard.
+static bool isNavScreen(Screen s) {
+  return s != SCR_EDITOR && s != SCR_PROMPT && s != SCR_NOSD;
+}
+
 void loop() {
   M5Cardputer.update();
+  inputSetNavKeys(isNavScreen(screen));
   inputPoll();
 
   uint32_t now = millis();
@@ -773,11 +1014,15 @@ void loop() {
       case SCR_CONFIRM: confirmKey(ev); break;
       case SCR_HELP: helpKey(ev); break;
       case SCR_NOSD: break;
+      case SCR_WIFI: wifiKey(ev); break;
+      case SCR_WIFI_SCAN: wifiScanKey(ev); break;
+      case SCR_USB: usbKey(ev); break;
+      case SCR_DRIVE: driveKey(ev); break;
     }
   }
 
   // Autosave once typing pauses, and periodically during long sessions.
-  if (screen != SCR_NOSD && editor.isOpen() && editor.dirty()) {
+  if (screen != SCR_NOSD && screen != SCR_DRIVE && editor.isOpen() && editor.dirty()) {
     bool idle = now - inputLastActivity() > AUTOSAVE_IDLE_MS;
     bool overdue = now - editor.lastSaveMs() > AUTOSAVE_MAX_MS;
     bool retryWait = editor.lastSaveFailed() && now - editor.lastSaveMs() < 10000;
@@ -798,7 +1043,20 @@ void loop() {
   static bool lastUsb = false;
   if (now - lastTick > 265) {
     lastTick = now;
-    if (screen == SCR_EDITOR || screen == SCR_MENU) needRedraw = true;
+    if (screen == SCR_EDITOR || screen == SCR_MENU || screen == SCR_DRIVE || screen == SCR_WIFI ||
+        screen == SCR_USB)
+      needRedraw = true;
+  }
+
+  // Wi-Fi: timeouts, and tell the user when a connection attempt finishes.
+  wifiPoll();
+  static NetState lastNet = NET_OFF;
+  if (wifiState() != lastNet) {
+    NetState st = wifiState();
+    if (st == NET_CONNECTED) editor.flash("Wi-Fi connected");
+    else if (st == NET_FAILED) editor.flash(String("Wi-Fi: ") + wifiError(), 3000);
+    lastNet = st;
+    needRedraw = true;
   }
   if (usbKbdConnected() != lastUsb) {
     lastUsb = usbKbdConnected();
@@ -809,6 +1067,12 @@ void loop() {
   if (needRedraw) {
     draw();
     needRedraw = false;
+  }
+  // Scanning blocks for a few seconds, so do it after "Scanning..." is on screen.
+  if (screen == SCR_WIFI_SCAN && wifiScanPending) {
+    wifiScanResult = wifiScan(wifiNets);
+    wifiScanPending = false;
+    needRedraw = true;
   }
   delay(2);
 }

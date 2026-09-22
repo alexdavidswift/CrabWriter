@@ -19,6 +19,8 @@ struct Settings {
   bool keySound = false;
   bool usbKeyboard = false;    // start the USB host at boot
   String lastFile = "";
+  String wifiSsid = "";        // saved network (password stored in plain text on the card)
+  String wifiPass = "";
 
   // Colours for the "Custom" theme, RGB888.
   uint32_t customBg = 0x1E1E2E;

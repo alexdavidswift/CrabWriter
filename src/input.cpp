@@ -26,7 +26,7 @@ uint32_t inputLastActivity() { return s_lastActivity; }
 // applies Shift whenever Ctrl is held, and it has no key repeat.
 //
 // Layout (x,y): modifiers fn(0,2) shift(1,2) ctrl(0,3) opt(1,3) alt(2,3).
-// Fn layer: ` = Esc, ; . , / = arrows, Backspace = Delete.
+// Fn layer: ` = Esc, ; . , / = arrows, Backspace = Delete (menus: no Fn needed).
 // Fn+Opt + arrows: ; = PgUp, . = PgDn, , = Home, / = End.
 
 static const uint32_t REPEAT_DELAY_MS = 420;
@@ -35,6 +35,9 @@ static const uint32_t REPEAT_RATE_MS = 45;
 struct Pos { int8_t x, y; bool operator==(const Pos& o) const { return x == o.x && y == o.y; } };
 
 static std::vector<Pos> s_prevKeys;
+static volatile bool s_navKeys = false;
+
+void inputSetNavKeys(bool on) { s_navKeys = on; }
 static Pos s_repeatKey = {-1, -1};
 static uint32_t s_repeatAt = 0;
 
@@ -51,14 +54,18 @@ static bool translate(const Pos& p, bool fn, bool shift, bool ctrl, bool opt, bo
   ev.src = SRC_BUILTIN;
   ev.mods = (ctrl ? MOD_CTRL : 0) | (shift ? MOD_SHIFT : 0) | (alt ? MOD_ALT : 0);
 
-  if (fn) {
+  // In menus the arrow keys work with or without Fn.
+  if (fn || (s_navKeys && !ctrl && !alt && !opt)) {
     switch (kv.value_first) {
       case '`': ev.key = K_ESC; return true;
       case ';': ev.key = opt ? K_PGUP : K_UP; return true;
       case '.': ev.key = opt ? K_PGDN : K_DOWN; return true;
       case ',': ev.key = opt ? K_HOME : K_LEFT; return true;
       case '/': ev.key = opt ? K_END : K_RIGHT; return true;
-      case KEY_BACKSPACE: ev.key = K_DELETE; return true;
+      case KEY_BACKSPACE:
+        if (!fn) break;  // plain Backspace stays Backspace in menus
+        ev.key = K_DELETE;
+        return true;
       default: break;
     }
   }

@@ -77,6 +77,8 @@ bool settingsLoad() {
     else if (k == "key_sound") settings.keySound = parseBool(v);
     else if (k == "usb_keyboard") settings.usbKeyboard = parseBool(v);
     else if (k == "last_file") settings.lastFile = v;
+    else if (k == "wifi_ssid") settings.wifiSsid = v;
+    else if (k == "wifi_password") settings.wifiPass = v;
     else if (k == "custom_bg") settings.customBg = strtoul(v.c_str(), nullptr, 16);
     else if (k == "custom_fg") settings.customFg = strtoul(v.c_str(), nullptr, 16);
     else if (k == "custom_accent") settings.customAccent = strtoul(v.c_str(), nullptr, 16);
@@ -104,6 +106,8 @@ bool settingsSave() {
   f.printf("key_sound=%d\n", settings.keySound);
   f.printf("usb_keyboard=%d\n", settings.usbKeyboard);
   f.printf("last_file=%s\n", settings.lastFile.c_str());
+  f.printf("wifi_ssid=%s\n", settings.wifiSsid.c_str());
+  f.printf("wifi_password=%s\n", settings.wifiPass.c_str());
   f.println("# Colours for the Custom theme (hex RRGGBB)");
   f.printf("custom_bg=%06lX\n", (unsigned long)settings.customBg);
   f.printf("custom_fg=%06lX\n", (unsigned long)settings.customFg);
